@@ -104,7 +104,11 @@ const UI = {
   refreshHome() {
     const prof = Profile.get();
     const n = prof.known.length;
-    $('#home-known-summary').textContent = n ? `${n} fandom${n === 1 ? '' : 's'} selected` : 'None selected yet. Pick the fandoms whose characters you know.';
+    const canPick = this.localCatalog().length > 0;
+    $('#home-edit-fandoms').classList.toggle('hidden', !canPick);
+    $('#home-known-summary').textContent = !canPick
+      ? "You'll choose the fandoms you know after you join a lobby (the host's game has the list)."
+      : n ? `${n} fandom${n === 1 ? '' : 's'} selected` : 'None selected yet. Pick the fandoms whose characters you know.';
     $('#home-lib').textContent = Library.hasPack || Library.size
       ? `Library: ${Library.size.toLocaleString()} characters in ${Library.fandoms.size} fandoms.`
       : 'Web player: no picture pack on this device. The host sends the pictures during the game.';
@@ -161,7 +165,7 @@ const UI = {
 
   enterSession() {
     this.imgRequested.clear(); this.cardHtml.clear(); this.feedSig = {}; this.settingsSig = '';
-    this.lastCurrent = null; this.resultsHidden = false;
+    this.lastCurrent = null; this.resultsHidden = false; this.askedFandoms = false;
     if (this.state) this.render(); else this.show('lobby');
   },
 
@@ -237,12 +241,26 @@ const UI = {
       <li>
         <span class="dot" style="background:${p.color}"></span>
         <span class="grow"><b>${esc(p.name)}</b>${p.pid === s.you ? ' <span class="muted">(you)</span>' : ''}
-          <div class="muted small">${p.known.filter(id => catIds.has(id)).length} fandoms known</div></span>
+          <div class="muted small">${(k => `${k} fandom${k === 1 ? "" : "s"} known`)(p.known.filter(id => catIds.has(id)).length)}</div></span>
         ${p.isHost ? '<span class="badge host">HOST</span>' : ''}
         ${!p.connected ? '<span class="badge off">offline</span>' : ''}
         ${this.amHost && !p.isHost ? `<button class="btn ghost small" data-kick="${p.pid}" title="Remove player">✕</button>` : ''}
       </li>`).join('');
     for (const b of $$('[data-kick]', $('#lobby-players'))) b.onclick = () => { if (confirm('Remove this player?')) Net.send({ t: 'kick', pid: b.dataset.kick }); };
+
+    // "Your fandoms" box — prominent, and opens the picker automatically the first time if you know none.
+    const me = s.players.find(p => p.pid === s.you);
+    const myCount = me ? me.known.filter(id => catIds.has(id)).length : 0;
+    const box = $('#lobby-my-known');
+    box.classList.toggle('warn', myCount === 0);
+    box.innerHTML = myCount
+      ? `<span class="grow">You know <b>${myCount}</b> of this lobby's fandoms.</span><button class="btn small" data-pick-known>Change…</button>`
+      : `<span class="grow"><b>Pick the fandoms you know</b><div class="small muted">So you get a character you can guess, and can answer about others.</div></span><button class="btn primary small" data-pick-known>Choose fandoms…</button>`;
+    box.querySelector('[data-pick-known]').onclick = () => this.editMyFandoms(this.catalog);
+    if (!this.askedFandoms && myCount === 0 && this.catalog.length && !$('#modal-root').children.length) {
+      this.askedFandoms = true;
+      setTimeout(() => this.editMyFandoms(this.catalog), 300);
+    }
 
     this.renderSettings();
     $('#lobby-start-wrap').classList.toggle('hidden', !this.amHost);
@@ -455,7 +473,6 @@ const UI = {
   openModal(html) {
     this.closeModal();
     const bg = el(`<div class="modal-bg"><div class="modal">${html}</div></div>`);
-    bg.addEventListener('mousedown', e => { if (e.target === bg) this.closeModal(); });
     $('#modal-root').appendChild(bg);
     return bg.firstElementChild;
   },
