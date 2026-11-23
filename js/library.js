@@ -15,6 +15,7 @@ const Library = {
       if (r.ok) {
         this.builtIn = await r.json();
         for (const c of this.builtIn.characters) c.img = 'data/' + c.img; // paths in the pack are relative to data/
+        await this.applyTags();
       }
     } catch { /* web player build ships without the pack */ }
     try {
@@ -24,6 +25,25 @@ const Library = {
     for (const f of Store.get('remoteFandoms', [])) this.remoteFandoms.set(f.id, f);
     this.reindex();
   },
+
+  // Trait tags (data/tags.json): per-character tags, English-name fixes and misfiled characters to drop.
+  genericTags: new Set(['male', 'female', 'human', 'adult', 'teen']),
+  async applyTags() {
+    let t;
+    try { const r = await fetch('data/tags.json', { cache: 'no-cache' }); if (!r.ok) return; t = await r.json(); } catch { return; }
+    if (t.generic) this.genericTags = new Set(t.generic);
+    const drop = new Set(t.drop || []);
+    this.builtIn.characters = this.builtIn.characters.filter(c => !drop.has(c.id));
+    for (const c of this.builtIn.characters) {
+      const rn = t.rename?.[c.id];
+      if (rn) { c.a = [...new Set([...(rn.a || []), ...(c.a || [])])].filter(x => x !== rn.n); c.n = rn.n; }
+      const tags = t.tags?.[c.id];
+      if (tags) c.t = tags;
+    }
+  },
+
+  // Tags a character can be themed on (excludes the very generic ones like #male / #human).
+  themeTags(c) { return (c.t || []).filter(x => !this.genericTags.has(x)); },
 
   reindex() {
     this.chars.clear(); this.fandoms.clear();
@@ -86,8 +106,8 @@ const Library = {
     return f;
   },
 
-  async addCustomCharacter(fid, name, aliases, dataUrl) {
-    const c = { id: 'c-' + randomCode(10).toLowerCase(), f: fid, n: name.trim(), a: aliases, data: dataUrl };
+  async addCustomCharacter(fid, name, aliases, dataUrl, tags = []) {
+    const c = { id: 'c-' + randomCode(10).toLowerCase(), f: fid, n: name.trim(), a: aliases, data: dataUrl, t: tags };
     this.custom.characters.push(c);
     await this.saveCustom();
     return c;

@@ -199,3 +199,7 @@ input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent); p
 }
 .my-known { display: flex; gap: 10px; align-items: center; padding: 10px 12px; margin-bottom: 12px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--line); }
 .my-known.warn { border-color: var(--accent); background: #8b5cf61f; }
+.theme-badge { display: inline-block; font-weight: 700; font-size: 14px; padding: 3px 12px; border-radius: 99px; background: linear-gradient(135deg, #8b5cf633, #22d3ee33); border: 1px solid var(--accent); color: #e9e4ff; white-space: nowrap; }
+.setting select { min-width: 190px; }
+.turn-box { min-width: 220px; }
+.turn-box > .row { flex-wrap: wrap; gap: 4px 10px; }

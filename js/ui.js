@@ -285,6 +285,8 @@ const UI = {
         <input type="number" id="set-guesses" min="1" max="5" value="${st.guessesPerRound}" ${dis}></div>
       <div class="setting"><label>Easy mode: tell players their own fandom<div class="muted small">Off by default. Players have to work out their fandom themselves.</div></label>
         <input type="checkbox" id="set-reveal" ${st.revealFandom ? 'checked' : ''} ${dis}></div>
+      <div class="setting"><label>Shared trait<div class="muted small">Every character gets one trait in common, like #blue or #sword.</div></label>
+        <select id="set-theme" ${dis}><option value="shown" ${st.theme === 'shown' ? 'selected' : ''}>Show it to everyone</option><option value="secret" ${st.theme === 'secret' ? 'selected' : ''}>Secret until the end</option><option value="off" ${st.theme === 'off' ? 'selected' : ''}>Off</option></select></div>
       <div class="setting" style="border:0"><label>Fandoms this game<div class="muted small">${st.fandoms.length} fandoms · ${pool.toLocaleString()} characters. Players get characters from fandoms they know when possible.</div></label>
         ${this.amHost ? '<button id="set-fandoms" class="btn">Choose…</button>' : ''}</div>
       <div class="fandom-summary">${names.slice(0, 60).map(n => `<span class="chip">${esc(n)}</span>`).join('') || '<span class="muted small">None selected yet.</span>'}${names.length > 60 ? `<span class="chip">+${names.length - 60} more</span>` : ''}</div>`;
@@ -293,6 +295,7 @@ const UI = {
     num('set-turn', 'turnSeconds');
     num('set-guesses', 'guessesPerRound');
     $('#set-reveal').addEventListener('change', e => Net.send({ t: 'settings', revealFandom: e.target.checked }));
+    $('#set-theme').addEventListener('change', e => Net.send({ t: 'settings', theme: e.target.value }));
     $('#set-fandoms').onclick = () => this.openFandomPicker({
       title: 'Fandoms for this game',
       catalog: this.catalog,
@@ -332,6 +335,8 @@ const UI = {
 
     $('#game-round').textContent = g.round;
     $('#game-code').textContent = s.code;
+    $('#game-theme').classList.toggle('hidden', !g.theme && !g.themeSecret);
+    $('#game-theme').textContent = g.theme ? 'Shared trait: #' + g.theme : 'Shared trait: secret';
     $('#game-turn-label').innerHTML = g.ended ? 'Game over!'
       : !g.current ? 'Waiting for players to reconnect…'
       : myTurn ? '<span style="color:var(--accent2)">Your turn!</span> Ask questions, add notes, or guess.'
@@ -455,7 +460,7 @@ const UI = {
           <div class="muted small">${esc(c.char?.fname || '')} · ${how}</div></div></div>`;
     }).join('');
     box.innerHTML = `<div class="box">
-      <h1>🏆 Results</h1>
+      <h1>🏆 Results</h1>${g.theme ? `<p class="center"><span class="theme-badge">Everyone shared #${esc(g.theme)}</span></p>` : ''}
       <div class="podium">${rows}</div>
       <div class="row" style="justify-content:center">
         <button class="btn" id="res-view">View board</button>
@@ -532,7 +537,8 @@ const UI = {
     const m = this.openModal(`<header><h2>How to play</h2></header><div class="body how">
       <ol>
         <li><b>Set up:</b> enter your name and tick the fandoms you know. One person hosts and shares the <b>6-character lobby code</b>. Up to 10 players.</li>
-        <li><b>Characters:</b> when the game starts, everyone gets a secret character from the host's chosen fandoms. Where possible it comes from a fandom you know. You can see everyone's character except your own.</li>
+        <li><b>Characters:</b> when the game starts, everyone gets a secret character, always from one of the fandoms <i>you</i> picked (that the host included). You can see everyone's character except your own, and you're not told which fandom yours is from.</li>
+        <li><b>Shared trait:</b> every character in the game has one trait in common, like #blue, #sword or #redhair, even across different fandoms. The host can show it, keep it secret until the end, or turn it off.</li>
         <li><b>Turns:</b> players take turns in order, ${'30'} seconds each by default. On your turn, ask the others yes/no questions (voice or chat) and add keywords or phrases to your <b>sheet</b>. Everyone can see every sheet.</li>
         <li><b>Guessing:</b> you get one guess per round (a round is everyone taking one turn). You can guess at any time. A wrong guess doesn't knock you out, so keep asking.</li>
         <li><b>Ranking:</b> the first person to guess right takes 1st place, then 2nd, then 3rd, and so on.</li>
@@ -561,6 +567,7 @@ const UI = {
         <div class="row" style="flex-wrap:wrap">
           <input id="cu-name" placeholder="Character name" maxlength="60" style="flex:1 1 180px">
           <input id="cu-alias" placeholder="Other names (comma separated)" maxlength="200" style="flex:1 1 220px">
+          <input id="cu-tags" placeholder="Traits, e.g. blue turtle water" maxlength="200" style="flex:1 1 220px" title="Use the same words as other characters (blue, sword, redhair, cat, villain…) so themes can match">
           <input id="cu-file" type="file" accept="image/*" style="flex:1 1 200px">
           <button class="btn primary" id="cu-add">Add character</button>
         </div>
@@ -605,8 +612,9 @@ const UI = {
       try {
         const data = await fileToResizedDataURL(file);
         const aliases = $('#cu-alias', m).value.split(',').map(s => s.trim()).filter(Boolean);
-        await Library.addCustomCharacter(current, name, aliases, data);
-        $('#cu-name', m).value = ''; $('#cu-alias', m).value = ''; $('#cu-file', m).value = '';
+        const tags = [...new Set($('#cu-tags', m).value.toLowerCase().split(/[\s,#]+/).filter(Boolean))];
+        await Library.addCustomCharacter(current, name, aliases, data, tags);
+        $('#cu-name', m).value = ''; $('#cu-alias', m).value = ''; $('#cu-tags', m).value = ''; $('#cu-file', m).value = '';
         drawGrid(); this.refreshHome(); toast(`Added ${name}.`, 'good');
       } catch (e) { toast(e.message, 'bad'); }
     };

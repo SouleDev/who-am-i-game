@@ -12,6 +12,7 @@ class HostGame {
       turnSeconds: 30,
       guessesPerRound: 1,
       revealFandom: false, // players work out their own fandom; host can turn on as an easy mode
+      theme: 'shown',      // shared trait: 'shown' to everyone, 'secret' until the end, or 'off'
       fandoms: prof.known.filter(id => Library.fandoms.has(id)),
     };
     this.phase = 'lobby';
@@ -82,6 +83,7 @@ class HostGame {
         if (m.turnSeconds) this.settings.turnSeconds = Math.max(10, Math.min(300, m.turnSeconds | 0));
         if (m.guessesPerRound) this.settings.guessesPerRound = Math.max(1, Math.min(5, m.guessesPerRound | 0));
         if (typeof m.revealFandom === 'boolean') this.settings.revealFandom = m.revealFandom;
+        if (['shown', 'secret', 'off'].includes(m.theme)) this.settings.theme = m.theme;
         if (Array.isArray(m.fandoms)) this.settings.fandoms = m.fandoms.filter(id => Library.fandoms.has(id));
         this.changed();
         break;
@@ -141,33 +143,66 @@ class HostGame {
     if (active.length < 2) return this.hostError('You need at least 2 players to start.');
     const fset = this.settings.fandoms.filter(id => Library.fandoms.has(id));
     if (!fset.length) return this.hostError('Pick at least one fandom for this round.');
-    const poolSize = fset.reduce((s, f) => s + Library.charsIn(f).length, 0);
-    if (poolSize < active.length) return this.hostError('Not enough characters in the selected fandoms.');
+    // Strict rule: a player's character only ever comes from fandoms THEY picked (and the host included).
+    const pools = new Map(active.map(p => [p.pid, fset.filter(f => p.known.has(f))]));
+    const without = active.filter(p => !pools.get(p.pid).length);
+    if (without.length) {
+      const names = without.map(p => p.name).join(', ');
+      return this.hostError(`${names} ${without.length > 1 ? "don't" : "doesn't"} know any of this game's fandoms. They need to pick fandoms they know, or you can add one of theirs to the game.`);
+    }
+    const cands = new Map(active.map(p => [p.pid, pools.get(p.pid).flatMap(f => Library.charsIn(f))]));
+    const knownByOthers = (p, c) => active.filter(o => o !== p && o.known.has(c.f)).length;
 
-    for (const p of active) p.spectator = false;
-    const used = new Set();
-    const assign = {};
-    for (const p of shuffle(active)) {
-      const mine = fset.filter(f => p.known.has(f));
-      let cand = mine.length ? mine : fset;
-      for (let tries = 0; tries < 50 && !assign[p.pid]; tries++) {
-        const others = active.filter(o => o !== p);
-        const f = weightedPick(cand, fid => 1 + 2 * others.filter(o => o.known.has(fid)).length);
-        const free = Library.charsIn(f).filter(c => !used.has(c.id));
-        if (!free.length) { cand = cand.filter(x => x !== f); if (!cand.length) cand = fset; continue; }
-        const c = free[Math.floor(Math.random() * free.length)];
-        used.add(c.id); assign[p.pid] = c.id;
+    // Give every player a different character from their list; null if impossible.
+    const assignDistinct = listFor => {
+      for (let attempt = 0; attempt < 25; attempt++) {
+        const used = new Set(), result = {};
+        const order = shuffle(active).sort((a, b) => listFor(a).length - listFor(b).length);
+        let ok = true;
+        for (const p of order) {
+          const free = listFor(p).filter(c => !used.has(c.id));
+          if (!free.length) { ok = false; break; }
+          const c = weightedPick(shuffle(free), x => 1 + 2 * knownByOthers(p, x));
+          used.add(c.id); result[p.pid] = c.id;
+        }
+        if (ok) return result;
+      }
+      return null;
+    };
+
+    // Shared trait: pick a tag that every player can get a character with.
+    let theme = null, assign = null;
+    if (this.settings.theme !== 'off') {
+      const byTag = new Map(); // tag -> Map(pid -> chars[])
+      for (const p of active) for (const c of cands.get(p.pid)) for (const t of Library.themeTags(c)) {
+        if (!byTag.has(t)) byTag.set(t, new Map());
+        const m = byTag.get(t); if (!m.has(p.pid)) m.set(p.pid, []); m.get(p.pid).push(c);
+      }
+      let options = [...byTag.entries()].filter(([, m]) => active.every(p => m.has(p.pid)));
+      while (options.length && !assign) {
+        const pick = weightedPick(options, ([, m]) => 1 + Math.min(4, Math.min(...active.map(p => m.get(p.pid).length))));
+        options = options.filter(o => o !== pick);
+        const [tag, m] = pick;
+        assign = assignDistinct(p => m.get(p.pid));
+        if (assign) theme = tag;
       }
     }
+    if (!assign) assign = assignDistinct(p => cands.get(p.pid));
+    if (!assign) return this.hostError("There aren't enough different characters in the players' fandoms. Add more fandoms to the game.");
+
+    for (const p of active) p.spectator = false;
     const order = shuffle(active.map(p => p.pid));
     this.game = {
-      order, assign, current: order[0], turnIdx: 0, round: 1, turnEndsAt: 0,
+      order, assign, theme, current: order[0], turnIdx: 0, round: 1, turnEndsAt: 0,
       sheets: Object.fromEntries(order.map(pid => [pid, []])),
       guessesUsed: {}, ranks: {}, nextTop: 1, nextBottom: order.length, ended: false,
     };
     this.phase = 'playing';
     this.feed = [];
     this.sys(`Game started with ${order.length} players. Round 1 — ${this.name(order[0])} goes first.`);
+    if (theme && this.settings.theme === 'shown') this.sys(`This game's shared trait is #${theme}. Every character has it!`, 'reveal');
+    else if (theme) this.sys('Every character shares one secret trait. It is revealed at the end.', 'reveal');
+    else if (this.settings.theme !== 'off') this.sys("No single trait fit everyone's fandoms this time, so characters were picked without a theme.");
     this.startTurn();
   }
 
@@ -270,6 +305,7 @@ class HostGame {
     }
     this.phase = 'results';
     this.sys(forced ? 'The host ended the game.' : 'Everyone has been ranked — game over!');
+    if (g.theme && this.settings.theme === 'secret') this.sys(`The secret shared trait was #${g.theme}.`, 'reveal');
     this.changed();
   }
 
@@ -334,6 +370,8 @@ class HostGame {
       const seesAll = g.ended || !g.order.includes(viewer.pid);
       view.game = {
         round: g.round, current: g.current, ended: g.ended,
+        theme: g.theme && (this.settings.theme === 'shown' || g.ended) ? g.theme : null,
+        themeSecret: !!g.theme && this.settings.theme === 'secret' && !g.ended,
         turnRemaining: g.current ? Math.max(0, g.turnEndsAt - Date.now()) : 0,
         guessesLeft: Math.max(0, this.settings.guessesPerRound - (g.guessesUsed[viewer.pid] || 0)),
         cards: g.order.map(pid => {
