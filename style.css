@@ -77,7 +77,7 @@ input[type=checkbox] { width: 17px; height: 17px; accent-color: var(--accent); p
 .home-foot > span { flex: 1; }
 
 /* ---------- topbar ---------- */
-.topbar { display: flex; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: #0f1020cc; }
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--line); background: #0f1020cc; }
 .code-box { display: flex; align-items: center; gap: 10px; }
 .code { font-size: 26px; font-weight: 800; letter-spacing: .22em; color: #fff; background: var(--bg2); border: 1px dashed var(--accent); border-radius: 10px; padding: 2px 12px; user-select: all; }
 
