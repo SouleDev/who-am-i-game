@@ -11,7 +11,7 @@ class HostGame {
     this.settings = {
       turnSeconds: 30,
       guessesPerRound: 1,
-      revealFandom: true,
+      revealFandom: false, // players work out their own fandom; host can turn on as an easy mode
       fandoms: prof.known.filter(id => Library.fandoms.has(id)),
     };
     this.phase = 'lobby';

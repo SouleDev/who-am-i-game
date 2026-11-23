@@ -265,7 +265,7 @@ const UI = {
         <input type="number" id="set-turn" min="10" max="300" step="5" value="${st.turnSeconds}" ${dis}></div>
       <div class="setting"><label>Guesses per round<div class="muted small">A round ends after everyone has had a turn.</div></label>
         <input type="number" id="set-guesses" min="1" max="5" value="${st.guessesPerRound}" ${dis}></div>
-      <div class="setting"><label>Tell players which fandom they're from<div class="muted small">Makes it easier with lots of fandoms.</div></label>
+      <div class="setting"><label>Easy mode: tell players their own fandom<div class="muted small">Off by default. Players have to work out their fandom themselves.</div></label>
         <input type="checkbox" id="set-reveal" ${st.revealFandom ? 'checked' : ''} ${dis}></div>
       <div class="setting" style="border:0"><label>Fandoms this game<div class="muted small">${st.fandoms.length} fandoms · ${pool.toLocaleString()} characters. Players get characters from fandoms they know when possible.</div></label>
         ${this.amHost ? '<button id="set-fandoms" class="btn">Choose…</button>' : ''}</div>
