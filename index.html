@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Who Am I? — Character Guessing Party</title>
+  <link rel="stylesheet" href="style.css?v=2">
+</head>
+<body>
+  <!-- ================= HOME ================= -->
+  <section id="screen-home" class="screen">
+    <div class="home-wrap">
+      <header class="brand">
+        <div class="brand-mark">?</div>
+        <div>
+          <h1>Who Am I?</h1>
+          <p class="tag">Everyone can see your character except you. Ask questions and figure out who you are.</p>
+        </div>
+      </header>
+
+      <div class="panel">
+        <label class="field">
+          <span>Your name</span>
+          <input id="home-name" maxlength="24" placeholder="Enter a display name" autocomplete="off">
+        </label>
+        <div class="field">
+          <span>Fandoms you know</span>
+          <div class="row">
+            <div id="home-known-summary" class="muted grow"></div>
+            <button id="home-edit-fandoms" class="btn ghost">Choose fandoms…</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="home-actions">
+        <div class="panel action">
+          <h2>Host a game</h2>
+          <p class="muted">Create a lobby and get a code to share. You choose the fandoms, and your copy supplies the pictures.</p>
+          <button id="home-host" class="btn primary big">Create lobby</button>
+        </div>
+        <div class="panel action">
+          <h2>Join a game</h2>
+          <p class="muted">Type the 6-character code the host gave you.</p>
+          <div class="row">
+            <input id="home-code" class="code-input" maxlength="7" placeholder="ABC123" autocomplete="off" spellcheck="false">
+            <button id="home-join" class="btn primary big">Join</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="home-foot">
+        <span id="home-lib" class="muted"></span>
+        <button id="home-custom" class="btn ghost small">Custom characters…</button>
+        <button id="home-how" class="btn ghost small">How to play</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= LOBBY ================= -->
+  <section id="screen-lobby" class="screen hidden">
+    <div class="topbar">
+      <div class="code-box">
+        <span class="muted small">Lobby code</span>
+        <span id="lobby-code" class="code"></span>
+        <button id="lobby-copy-code" class="btn ghost small">Copy code</button>
+        <button id="lobby-copy-link" class="btn ghost small hidden">Copy invite link</button>
+      </div>
+      <div class="grow"></div>
+      <button id="lobby-my-fandoms" class="btn ghost">My fandoms</button>
+      <button id="lobby-leave" class="btn danger">Leave</button>
+    </div>
+    <div class="lobby-grid">
+      <div class="panel">
+        <h2>Players <span id="lobby-count" class="muted"></span></h2>
+        <ul id="lobby-players" class="player-list"></ul>
+      </div>
+      <div class="panel">
+        <h2>Game settings</h2>
+        <div id="lobby-settings"></div>
+        <div id="lobby-start-wrap">
+          <button id="lobby-start" class="btn primary big wide">Start game</button>
+        </div>
+        <p id="lobby-wait" class="muted center hidden">Waiting for the host to start…</p>
+      </div>
+      <div class="panel feed-panel">
+        <h2>Chat</h2>
+        <div id="lobby-feed" class="feed"></div>
+        <form id="lobby-chat" class="row chat-form">
+          <input maxlength="300" placeholder="Say something…" autocomplete="off">
+          <button class="btn">Send</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= GAME ================= -->
+  <section id="screen-game" class="screen hidden">
+    <div class="topbar">
+      <div class="round-box"><span class="muted small">Round</span> <b id="game-round">1</b><div class="muted small" title="Players who drop out can rejoin with this code">Code <b id="game-code"></b></div></div>
+      <div class="turn-box grow">
+        <div id="game-turn-label">…</div>
+        <div class="timer"><div id="game-timer-bar"></div></div>
+      </div>
+      <div id="game-timer-num" class="timer-num">30</div>
+      <div id="game-host-controls" class="row hidden">
+        <button id="game-add-time" class="btn ghost small" title="Give the current player 15 more seconds">+15s</button>
+        <button id="game-skip" class="btn ghost small">Skip turn</button>
+        <button id="game-end" class="btn ghost small">End game</button>
+      </div>
+      <button id="game-leave" class="btn danger small">Leave</button>
+    </div>
+    <div class="game-grid">
+      <div class="board-wrap">
+        <div id="game-board" class="board"></div>
+        <div id="game-actions" class="actions panel">
+          <form id="game-note" class="row">
+            <input maxlength="80" placeholder="Add a keyword or phrase to your sheet (on your turn)…" autocomplete="off">
+            <button class="btn">Add note</button>
+          </form>
+          <form id="game-guess" class="row">
+            <input maxlength="80" placeholder="Who are you? Type your guess…" autocomplete="off">
+            <button class="btn primary">Guess</button>
+          </form>
+          <div class="row">
+            <span id="game-guess-info" class="muted small grow"></span>
+            <button id="game-end-turn" class="btn">End my turn</button>
+            <button id="game-give-up" class="btn danger">Give up &amp; reveal</button>
+          </div>
+        </div>
+      </div>
+      <div class="panel feed-panel">
+        <h2>Activity &amp; chat</h2>
+        <div id="game-feed" class="feed"></div>
+        <form id="game-chat" class="row chat-form">
+          <input maxlength="300" placeholder="Ask a question or answer one…" autocomplete="off">
+          <button class="btn">Send</button>
+        </form>
+      </div>
+    </div>
+    <div id="results" class="results hidden"></div>
+  </section>
+
+  <div id="modal-root"></div>
+  <div id="toasts"></div>
+  <div id="busy" class="busy hidden"><div class="spinner"></div><div id="busy-text">Connecting…</div></div>
+
+  <script src="vendor/peerjs.min.js"></script>
+  <script src="config.js?v=2"></script>
+  <script src="js/util.js?v=2"></script>
+  <script src="js/library.js?v=2"></script>
+  <script src="js/host.js?v=2"></script>
+  <script src="js/net.js?v=2"></script>
+  <script src="js/ui.js?v=2"></script>
+</body>
+</html>
