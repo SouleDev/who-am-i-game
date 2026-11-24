@@ -23,11 +23,13 @@ class HostGame {
   }
 
   // ---------------- players ----------------
-  addPlayer({ clientId, name, known, conn, isHost, have }) {
+  addPlayer({ clientId, name, known, checked, dropped, conn, isHost, have }) {
     let p = this.players.find(x => x.clientId === clientId);
     if (p) { // reconnect
       p.conn = conn; p.connected = true; p.name = name || p.name; p.have = new Set(have || []);
       if (known) p.known = new Set(known);
+      if (checked) p.checked = new Set(checked);
+      if (dropped) p.dropped = new Set(dropped);
       this.sys(`${p.name} reconnected.`);
       this.changed();
       return p;
@@ -36,7 +38,7 @@ class HostGame {
     if (active.length >= MAX_PLAYERS && this.phase === 'lobby') return { error: 'That lobby is full (10 players max).' };
     const usedColors = new Set(this.players.map(x => x.color));
     p = {
-      pid: randomId('p'), clientId, name: (name || 'Player').slice(0, 24), known: new Set(known || []),
+      pid: randomId('p'), clientId, name: (name || 'Player').slice(0, 24), known: new Set(known || []), checked: new Set(checked || []), dropped: new Set(dropped || []),
       conn, connected: true, isHost: !!isHost, spectator: this.phase !== 'lobby', have: new Set(have || []),
       color: PLAYER_COLORS.find(c => !usedColors.has(c)) || PLAYER_COLORS[this.players.length % PLAYER_COLORS.length],
     };
@@ -68,7 +70,18 @@ class HostGame {
     if (!p || !m || typeof m !== 'object') return;
     const isHost = p.isHost;
     switch (m.t) {
-      case 'setKnown': p.known = new Set((m.known || []).slice(0, 5000)); this.changed(); break;
+      case 'setKnown':
+        p.known = new Set((m.known || []).slice(0, 5000));
+        if (Array.isArray(m.checked)) p.checked = new Set(m.checked.slice(0, 20000));
+        if (Array.isArray(m.dropped)) p.dropped = new Set(m.dropped.slice(0, 20000));
+        this.changed(); break;
+      case 'charList': {
+        // character names for fandoms (web players have no library of their own)
+        const want = new Set((m.fandoms || []).slice(0, 1000));
+        const chars = [...Library.chars.values()].filter(c => want.has(c.f)).slice(0, 8000).map(c => ({ id: c.id, n: c.n, f: c.f }));
+        this.sendTo(p, { t: 'charList', req: m.req, chars });
+        break;
+      }
       case 'setName': p.name = String(m.name || '').slice(0, 24) || p.name; this.changed(); break;
       case 'chat': {
         const text = String(m.text || '').trim().slice(0, 300);
@@ -133,7 +146,44 @@ class HostGame {
       case 'guess': this.guess(p, String(m.text || '').trim().slice(0, 80)); break;
       case 'endTurn': if (this.game && this.game.current === pid && !this.game.ended) this.nextTurn(); break;
       case 'giveUp': this.giveUp(p); break;
+      case 'swap': {
+        // players swap their own character once per game; the host may swap anyone's
+        const target = isHost && m.pid ? this.player(m.pid) : p;
+        if (target) this.swapCharacter(target, isHost && target !== p);
+        break;
+      }
     }
+  }
+
+  // Characters a player can be given: their fandoms (minus dropped) plus individually checked ones, within the game's fandoms.
+  eligible(p, fandoms) {
+    const fs = new Set(fandoms);
+    const out = [];
+    for (const f of fandoms) if (p.known.has(f)) for (const c of Library.charsIn(f)) if (!p.dropped.has(c.id)) out.push(c);
+    for (const id of p.checked) { const c = Library.chars.get(id); if (c && fs.has(c.f) && !p.known.has(c.f)) out.push(c); }
+    return out;
+  }
+
+  // Replace a player's character with another that fits the same rules (their fandoms + shared trait).
+  swapCharacter(p, byHost) {
+    const g = this.game;
+    if (!g || g.ended || !g.order.includes(p.pid) || g.ranks[p.pid]) return;
+    if (!byHost && (g.swapsUsed[p.pid] || 0) >= 1) return this.tell(p, 'You already used your swap this game.');
+    const used = new Set(Object.values(g.assign));
+    const tried = g.history[p.pid] || (g.history[p.pid] = new Set([g.assign[p.pid]]));
+    const others = this.players.filter(o => o !== p && g.order.includes(o.pid));
+    const options = this.eligible(p, g.fandoms)
+      .filter(c => !used.has(c.id) && !tried.has(c.id) && (!g.theme || (c.t || []).includes(g.theme)));
+    if (!options.length) {
+      const who = byHost ? this.player(this.players.find(x => x.isHost)?.pid) : p;
+      return this.tell(who || p, `No other characters fit ${byHost ? p.name + "'s" : 'your'} fandoms${g.theme ? ' and the #' + g.theme + ' trait' : ''}.`);
+    }
+    const c = weightedPick(shuffle(options), x => 1 + 2 * others.filter(o => o.known.has(x.f)).length);
+    g.assign[p.pid] = c.id; tried.add(c.id);
+    g.sheets[p.pid] = [];
+    if (!byHost) g.swapsUsed[p.pid] = (g.swapsUsed[p.pid] || 0) + 1;
+    this.sys(byHost ? `The host swapped ${p.name}'s character. Their sheet was cleared.` : `${p.name} swapped their character. Their sheet was cleared.`, 'reveal');
+    this.changed();
   }
 
   // ---------------- game flow ----------------
@@ -144,13 +194,13 @@ class HostGame {
     const fset = this.settings.fandoms.filter(id => Library.fandoms.has(id));
     if (!fset.length) return this.hostError('Pick at least one fandom for this round.');
     // Strict rule: a player's character only ever comes from fandoms THEY picked (and the host included).
-    const pools = new Map(active.map(p => [p.pid, fset.filter(f => p.known.has(f))]));
-    const without = active.filter(p => !pools.get(p.pid).length);
+    const cands = new Map(active.map(p => [p.pid, this.eligible(p, fset)]));
+    const without = active.filter(p => !cands.get(p.pid).length);
     if (without.length) {
       const names = without.map(p => p.name).join(', ');
-      return this.hostError(`${names} ${without.length > 1 ? "don't" : "doesn't"} know any of this game's fandoms. They need to pick fandoms they know, or you can add one of theirs to the game.`);
+      return this.hostError(`${names} ${without.length > 1 ? "don't" : "doesn't"} have any characters in this game's fandoms. They need to pick fandoms or characters they know, or you can add one of their fandoms to the game.`);
     }
-    const cands = new Map(active.map(p => [p.pid, pools.get(p.pid).flatMap(f => Library.charsIn(f))]));
+
     const knownByOthers = (p, c) => active.filter(o => o !== p && o.known.has(c.f)).length;
 
     // Give every player a different character from their list; null if impossible.
@@ -193,7 +243,7 @@ class HostGame {
     for (const p of active) p.spectator = false;
     const order = shuffle(active.map(p => p.pid));
     this.game = {
-      order, assign, theme, current: order[0], turnIdx: 0, round: 1, turnEndsAt: 0,
+      order, assign, theme, fandoms: fset, swapsUsed: {}, history: {}, current: order[0], turnIdx: 0, round: 1, turnEndsAt: 0,
       sheets: Object.fromEntries(order.map(pid => [pid, []])),
       guessesUsed: {}, ranks: {}, nextTop: 1, nextBottom: order.length, ended: false,
     };
@@ -337,7 +387,8 @@ class HostGame {
     const view = this.viewFor(p);
     const visible = new Set((view.game?.cards || []).map(c => c.char?.id).filter(Boolean));
     for (const id of ids.slice(0, 20)) {
-      if (!visible.has(id)) continue; // never leak your own character
+      // during a game only pictures you can already see; in the lobby anything (for browsing / Check or Drop)
+      if (this.phase !== 'lobby' && !visible.has(id)) continue;
       const data = await Library.imgData(id);
       if (data) this.sendTo(p, { t: 'img', id, data });
     }
@@ -362,7 +413,7 @@ class HostGame {
     const view = {
       t: 'state', you: viewer.pid, code: this.code, phase: this.phase,
       settings: { ...this.settings },
-      players: this.players.map(p => ({ pid: p.pid, name: p.name, isHost: p.isHost, connected: p.connected, spectator: p.spectator, color: p.color, known: [...p.known] })),
+      players: this.players.map(p => ({ checkedN: p.checked.size, droppedN: p.dropped.size, pid: p.pid, name: p.name, isHost: p.isHost, connected: p.connected, spectator: p.spectator, color: p.color, known: [...p.known] })),
       feed: this.feed.slice(-120),
       game: null,
     };
@@ -374,6 +425,7 @@ class HostGame {
         themeSecret: !!g.theme && this.settings.theme === 'secret' && !g.ended,
         turnRemaining: g.current ? Math.max(0, g.turnEndsAt - Date.now()) : 0,
         guessesLeft: Math.max(0, this.settings.guessesPerRound - (g.guessesUsed[viewer.pid] || 0)),
+        swapsLeft: g.ranks[viewer.pid] ? 0 : Math.max(0, 1 - (g.swapsUsed[viewer.pid] || 0)),
         cards: g.order.map(pid => {
           const c = Library.chars.get(g.assign[pid]);
           const visible = seesAll || pid !== viewer.pid || !!g.ranks[pid];
@@ -400,6 +452,6 @@ class HostGame {
   }
 
   fandomCatalog() {
-    return Library.fandomList().map(f => ({ id: f.id, name: f.name, tags: f.tags, count: f.count }));
+    return Library.fandomList().map(f => ({ id: f.id, name: f.name, tags: f.tags, count: f.count, cat: f.cat || (f.id.startsWith("c-") ? "Custom" : "Other"), sub: f.sub || (f.id.startsWith("c-") ? "Your fandoms" : "Other") }));
   }
 }

@@ -2,7 +2,7 @@
 const Profile = {
   get() {
     const p = Store.get('profile', {});
-    return { name: p.name || '', known: Array.isArray(p.known) ? p.known : [] };
+    return { name: p.name || '', known: Array.isArray(p.known) ? p.known : [], checked: Array.isArray(p.checked) ? p.checked : [], dropped: Array.isArray(p.dropped) ? p.dropped : [] };
   },
   set(p) { Store.set('profile', p); },
   // per-tab id so a refresh can rejoin as the same player (and test tabs stay separate)
@@ -40,6 +40,7 @@ const UI = {
 
     $('#home-name').addEventListener('input', e => { const p = Profile.get(); p.name = e.target.value.trim(); Profile.set(p); });
     $('#home-edit-fandoms').onclick = () => this.editMyFandoms(this.localCatalog());
+    $('#home-cod').onclick = () => this.editMyFandoms(this.localCatalog(), { startDeck: true });
     $('#home-host').onclick = () => this.host();
     $('#home-join').onclick = () => this.join();
     $('#home-code').addEventListener('keydown', e => { if (e.key === 'Enter') this.join(); });
@@ -60,6 +61,10 @@ const UI = {
     $('#game-skip').onclick = () => Net.send({ t: 'skipTurn' });
     $('#game-end').onclick = () => { if (confirm('End the game now? Everyone still guessing shares the remaining places.')) Net.send({ t: 'endGame' }); };
     $('#game-end-turn').onclick = () => Net.send({ t: 'endTurn' });
+    $('#game-swap').onclick = () => {
+      if (confirm('Swap your character? You get a different one from your fandoms with the same shared trait, and your sheet is cleared. You can do this once per game.')) Net.send({ t: 'swap' });
+    };
+    $('#game-restart').onclick = () => { if (confirm('Restart the lobby? This game ends right away and everyone goes back to the lobby.')) Net.send({ t: 'toLobby' }); };
     $('#game-give-up').onclick = () => {
       if (confirm('Give up? Your character is revealed and you take the last open place.')) Net.send({ t: 'giveUp' });
     };
@@ -79,6 +84,8 @@ const UI = {
       inp.value = '';
     });
     $('#game-board').addEventListener('click', e => {
+      const sw = e.target.closest('[data-swap]');
+      if (sw) { if (confirm('Give this player a different character (same shared trait, from their fandoms)? Their sheet is cleared.')) Net.send({ t: 'swap', pid: sw.dataset.swap }); return; }
       const b = e.target.closest('[data-del]');
       if (b) Net.send({ t: 'noteDel', index: +b.dataset.del });
     });
@@ -106,6 +113,7 @@ const UI = {
     const n = prof.known.length;
     const canPick = this.localCatalog().length > 0;
     $('#home-edit-fandoms').classList.toggle('hidden', !canPick);
+    $('#home-cod').classList.toggle('hidden', !Library.hasPack);
     $('#home-known-summary').textContent = !canPick
       ? "You'll choose the fandoms you know after you join a lobby (the host's game has the list)."
       : n ? `${n} fandom${n === 1 ? '' : 's'} selected` : 'None selected yet. Pick the fandoms whose characters you know.';
@@ -207,10 +215,12 @@ const UI = {
       }
       case 'img':
         Library.received.set(m.id, m.data);
+        document.dispatchEvent(new CustomEvent('whoami:img', { detail: m.id }));
         this.cardHtml.clear();
         if (this.state) this.render();
         break;
       case 'notice': toast(m.text, 'bad'); break;
+      case 'charList': CharSource.resolve(m); break;
       case 'catalog': this.catalog = m.fandoms; Library.rememberRemoteFandoms(m.fandoms); this.settingsSig = ''; this.render(); break;
       case 'kicked': toast('The host removed you from the lobby.', 'bad', 6000); this.leave(true); break;
       case 'closed': toast('The host closed the lobby.', 'bad', 6000); this.leave(true); break;
@@ -241,7 +251,7 @@ const UI = {
       <li>
         <span class="dot" style="background:${p.color}"></span>
         <span class="grow"><b>${esc(p.name)}</b>${p.pid === s.you ? ' <span class="muted">(you)</span>' : ''}
-          <div class="muted small">${(k => `${k} fandom${k === 1 ? "" : "s"} known`)(p.known.filter(id => catIds.has(id)).length)}</div></span>
+          <div class="muted small">${(k => `${k} fandom${k === 1 ? "" : "s"} known`)(p.known.filter(id => catIds.has(id)).length)}${p.checkedN ? ` · +${p.checkedN} characters` : ""}</div></span>
         ${p.isHost ? '<span class="badge host">HOST</span>' : ''}
         ${!p.connected ? '<span class="badge off">offline</span>' : ''}
         ${this.amHost && !p.isHost ? `<button class="btn ghost small" data-kick="${p.pid}" title="Remove player">✕</button>` : ''}
@@ -252,12 +262,13 @@ const UI = {
     const me = s.players.find(p => p.pid === s.you);
     const myCount = me ? me.known.filter(id => catIds.has(id)).length : 0;
     const box = $('#lobby-my-known');
-    box.classList.toggle('warn', myCount === 0);
-    box.innerHTML = myCount
-      ? `<span class="grow">You know <b>${myCount}</b> of this lobby's fandoms.</span><button class="btn small" data-pick-known>Change…</button>`
+    box.classList.toggle('warn', myCount === 0 && !me?.checkedN);
+    box.innerHTML = (myCount || me?.checkedN)
+      ? `<span class="grow">You know <b>${myCount}</b> of this lobby's fandoms${me.checkedN ? ` + <b>${me.checkedN}</b> single characters` : ''}.</span><button class="btn small" data-cod>Check or Drop</button><button class="btn small" data-pick-known>Change…</button>`
       : `<span class="grow"><b>Pick the fandoms you know</b><div class="small muted">So you get a character you can guess, and can answer about others.</div></span><button class="btn primary small" data-pick-known>Choose fandoms…</button>`;
     box.querySelector('[data-pick-known]').onclick = () => this.editMyFandoms(this.catalog);
-    if (!this.askedFandoms && myCount === 0 && this.catalog.length && !$('#modal-root').children.length) {
+    box.querySelector('[data-cod]')?.addEventListener('click', () => this.editMyFandoms(this.catalog, { startDeck: true }));
+    if (!this.askedFandoms && myCount === 0 && !me?.checkedN && this.catalog.length && !$('#modal-root').children.length) {
       this.askedFandoms = true;
       setTimeout(() => this.editMyFandoms(this.catalog), 300);
     }
@@ -287,9 +298,13 @@ const UI = {
         <input type="checkbox" id="set-reveal" ${st.revealFandom ? 'checked' : ''} ${dis}></div>
       <div class="setting"><label>Shared trait<div class="muted small">Every character gets one trait in common, like #blue or #sword.</div></label>
         <select id="set-theme" ${dis}><option value="shown" ${st.theme === 'shown' ? 'selected' : ''}>Show it to everyone</option><option value="secret" ${st.theme === 'secret' ? 'selected' : ''}>Secret until the end</option><option value="off" ${st.theme === 'off' ? 'selected' : ''}>Off</option></select></div>
-      <div class="setting" style="border:0"><label>Fandoms this game<div class="muted small">${st.fandoms.length} fandoms · ${pool.toLocaleString()} characters. Players get characters from fandoms they know when possible.</div></label>
-        ${this.amHost ? '<button id="set-fandoms" class="btn">Choose…</button>' : ''}</div>
-      <div class="fandom-summary">${names.slice(0, 60).map(n => `<span class="chip">${esc(n)}</span>`).join('') || '<span class="muted small">None selected yet.</span>'}${names.length > 60 ? `<span class="chip">+${names.length - 60} more</span>` : ''}</div>`;
+      <div class="setting" style="border:0"><label>Fandoms this game<div class="muted small">${st.fandoms.length} fandoms · ${pool.toLocaleString()} characters. Each player only gets characters from fandoms they picked.</div></label>
+        ${this.amHost ? '<button id="set-fandoms" class="btn">Choose…</button>' : '<button id="set-fandoms-view" class="btn ghost">View…</button>'}</div>
+      <div class="cat-summary">${fandomSummary(st.fandoms, this.catalog).map(c => `<span class="chip">${c.icon} ${esc(c.id)} <b>${c.n}</b></span>`).join('') || '<span class="muted small">None selected yet.</span>'}</div>`;
+    $('#set-fandoms-view')?.addEventListener('click', () => {
+      const m = this.openModal(`<header><h2>Fandoms this game</h2></header><div class="body"><div class="fchips" style="padding:4px 0 14px">${names.map(n => `<span class="fchip on" style="cursor:default"><span class="tick">✓</span>${esc(n)}</span>`).join('')}</div></div><footer><button class="btn primary" id="fv-ok">Close</button></footer>`);
+      $('#fv-ok', m).onclick = () => this.closeModal();
+    });
     if (!this.amHost) return;
     const num = (id, key) => $('#' + id).addEventListener('change', e => Net.send({ t: 'settings', [key]: +e.target.value }));
     num('set-turn', 'turnSeconds');
@@ -305,19 +320,25 @@ const UI = {
     });
   },
 
-  editMyFandoms(catalog) {
+  // opts.startDeck: jump straight into Check or Drop
+  editMyFandoms(catalog, opts = {}) {
     const prof = Profile.get();
     this.openFandomPicker({
-      title: 'Fandoms you know',
-      subtitle: 'You will get characters from these fandoms when possible, and others can count on you to answer questions about them.',
+      title: 'What you know',
+      subtitle: 'Your character always comes from these fandoms (minus characters you drop), plus any characters you check one by one.',
       catalog,
       selected: new Set(prof.known),
-      onSave: sel => {
+      charPrefs: { checked: new Set(prof.checked), dropped: new Set(prof.dropped) },
+      startDeck: opts.startDeck,
+      onSave: (sel, prefs) => {
         const inCat = new Set(catalog.map(f => f.id));
         const keep = prof.known.filter(id => !inCat.has(id));
-        const p = Profile.get(); p.known = [...new Set([...keep, ...sel])]; Profile.set(p);
+        const p = Profile.get();
+        p.known = [...new Set([...keep, ...sel])];
+        if (prefs) { p.checked = [...prefs.checked]; p.dropped = [...prefs.dropped]; }
+        Profile.set(p);
         this.refreshHome();
-        if (Net.role) Net.send({ t: 'setKnown', known: p.known });
+        if (Net.role) Net.send({ t: 'setKnown', known: p.known, checked: p.checked, dropped: p.dropped });
       },
     });
   },
@@ -378,6 +399,8 @@ const UI = {
       $('#game-guess input').disabled = $('#game-guess button').disabled = done || g.guessesLeft <= 0;
       $('#game-end-turn').disabled = !myTurn;
       $('#game-give-up').disabled = done;
+      $('#game-swap').disabled = done || !g.swapsLeft;
+      $('#game-swap').textContent = g.swapsLeft ? 'Swap my character' : 'Swap used';
       $('#game-guess-info').textContent = done
         ? `You finished ${placeLabel(myCard.rank.place)}. Keep helping the others!`
         : g.guessesLeft > 0 ? `${g.guessesLeft} guess${g.guessesLeft === 1 ? '' : 'es'} left this round. Wrong guesses don't knock you out.`
@@ -410,7 +433,8 @@ const UI = {
         <div class="cfandom">${fandom}</div>
         <div class="pname"><span class="dot" style="background:${p.color}"></span><b>${esc(p.name || '?')}</b>${isMe ? ' <span class="muted">(you)</span>' : ''}
           ${!p.connected ? '<span class="badge off">offline</span>' : ''}
-          ${c.rank ? `<span class="badge">${placeLabel(c.rank.place)}</span>` : c.usedGuess ? '<span class="badge">guessed</span>' : ''}</div>
+          ${c.rank ? `<span class="badge">${placeLabel(c.rank.place)}</span>` : c.usedGuess ? '<span class="badge">guessed</span>' : ''}
+          ${this.amHost && !isMe && !c.rank && !g.ended ? `<button class="btn ghost small card-swap" data-swap="${c.pid}" title="Give this player a different character">Swap</button>` : ''}</div>
       </div>
       <div class="sheet">${notes}</div>`;
   },
@@ -483,56 +507,6 @@ const UI = {
   },
   closeModal() { $('#modal-root').innerHTML = ''; },
 
-  openFandomPicker({ title, subtitle, catalog, selected, players, onSave }) {
-    const sel = new Set(selected);
-    let filter = 'all', query = '';
-    const knownBy = id => players ? players.filter(p => p.known.includes(id)).length : 0;
-    const tags = [...new Set(catalog.flatMap(f => f.tags || []))];
-    const m = this.openModal(`
-      <header><h2>${esc(title)}</h2><input id="fp-q" placeholder="Search fandoms…" style="width:260px"></header>
-      ${subtitle ? `<p class="muted small" style="padding:0 18px;margin:0 0 8px">${esc(subtitle)}</p>` : ''}
-      <div class="filters">
-        <button class="btn small on" data-f="all">All (${catalog.length})</button>
-        <button class="btn small" data-f="selected">Selected</button>
-        ${tags.map(t => `<button class="btn small" data-f="${esc(t)}">${esc(TAG_LABELS[t] || t)}</button>`).join('')}
-        ${players ? '<span class="grow"></span><button class="btn small ghost" data-q="anyone">Select: known by anyone</button><button class="btn small ghost" data-q="everyone">Select: known by everyone</button>' : ''}
-      </div>
-      <div class="body"><div class="fandom-list" id="fp-list"></div></div>
-      <footer><button class="btn ghost small" id="fp-all">Select shown</button><button class="btn ghost small" id="fp-none">Clear shown</button>
-        <span class="grow muted small" id="fp-count"></span><button class="btn" id="fp-cancel">Cancel</button><button class="btn primary" id="fp-save">Save</button></footer>`);
-    const shown = () => catalog.filter(f =>
-      (filter === 'all' || (filter === 'selected' ? sel.has(f.id) : (f.tags || []).includes(filter))) &&
-      (!query || f.name.toLowerCase().includes(query)));
-    const draw = () => {
-      $('#fp-list', m).innerHTML = shown().map(f => {
-        const k = knownBy(f.id);
-        return `<label><input type="checkbox" data-id="${esc(f.id)}" ${sel.has(f.id) ? 'checked' : ''}>
-          <span class="fname" title="${esc(f.name)}">${esc(f.name)}</span>
-          ${players ? `<span class="who" title="Players who know this fandom">${k ? '👤' + k : ''}</span>` : ''}
-          <span class="cnt">${f.count || ''}</span></label>`;
-      }).join('') || '<p class="muted">No fandoms match.</p>';
-      $('#fp-count', m).textContent = `${sel.size} selected`;
-    };
-    $('#fp-list', m).addEventListener('change', e => {
-      const id = e.target.dataset.id; if (!id) return;
-      e.target.checked ? sel.add(id) : sel.delete(id);
-      $('#fp-count', m).textContent = `${sel.size} selected`;
-    });
-    $('#fp-q', m).addEventListener('input', e => { query = e.target.value.trim().toLowerCase(); draw(); });
-    for (const b of $$('[data-f]', m)) b.onclick = () => { filter = b.dataset.f; $$('[data-f]', m).forEach(x => x.classList.toggle('on', x === b)); draw(); };
-    for (const b of $$('[data-q]', m)) b.onclick = () => {
-      sel.clear();
-      for (const f of catalog) { const k = knownBy(f.id); if (b.dataset.q === 'anyone' ? k > 0 : k === players.length) sel.add(f.id); }
-      draw();
-    };
-    $('#fp-all', m).onclick = () => { shown().forEach(f => sel.add(f.id)); draw(); };
-    $('#fp-none', m).onclick = () => { shown().forEach(f => sel.delete(f.id)); draw(); };
-    $('#fp-cancel', m).onclick = () => this.closeModal();
-    $('#fp-save', m).onclick = () => { onSave(sel); this.closeModal(); };
-    draw();
-    $('#fp-q', m).focus();
-  },
-
   openHowTo() {
     const m = this.openModal(`<header><h2>How to play</h2></header><div class="body how">
       <ol>
@@ -543,7 +517,8 @@ const UI = {
         <li><b>Guessing:</b> you get one guess per round (a round is everyone taking one turn). You can guess at any time. A wrong guess doesn't knock you out, so keep asking.</li>
         <li><b>Ranking:</b> the first person to guess right takes 1st place, then 2nd, then 3rd, and so on.</li>
         <li><b>Give up:</b> the give-up button reveals your character right away and puts you in the last open place.</li>
-        <li><b>Host tools:</b> the host can add 15 seconds, skip a turn, accept a near-miss guess, or end the game.</li>
+        <li><b>Swap:</b> once per game you can swap your character for a different one, still from your fandoms and still with the shared trait. Your sheet is cleared.</li>
+        <li><b>Host tools:</b> the host can add 15 seconds, skip a turn, accept a near-miss guess, swap any player's character, end the game, or restart the lobby.</li>
       </ol>
       <p class="muted small">Only the host needs the character pictures. Players who are missing one get it from the host automatically, including any custom characters the host has added.</p>
     </div><footer><button class="btn primary" id="how-ok">Got it</button></footer>`);

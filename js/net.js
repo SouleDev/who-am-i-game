@@ -31,7 +31,7 @@ const Net = {
           this.peer = peer; this.role = 'host';
           this.host = new HostGame(code, msg => this.deliver(msg));
           const prof = Profile.get();
-          const me = this.host.addPlayer({ clientId: Profile.clientId(), name: prof.name, known: prof.known, isHost: true });
+          const me = this.host.addPlayer({ clientId: Profile.clientId(), name: prof.name, known: prof.known, checked: prof.checked, dropped: prof.dropped, isHost: true });
           this.myPid = me.pid;
           this.host.feed = [];
           this.host.sys(`Lobby created. Share the code ${code} with your friends.`);
@@ -61,7 +61,7 @@ const Net = {
         if (m.t !== 'hello') return;
         const res = this.host.addPlayer({
           clientId: String(m.clientId || conn.peer).slice(0, 64), name: String(m.name || 'Player'),
-          known: Array.isArray(m.known) ? m.known : [], conn, have: Array.isArray(m.have) ? m.have : [],
+          known: Array.isArray(m.known) ? m.known : [], checked: Array.isArray(m.checked) ? m.checked : [], dropped: Array.isArray(m.dropped) ? m.dropped : [], conn, have: Array.isArray(m.have) ? m.have : [],
         });
         if (res.error) { conn.send({ t: 'rejected', reason: res.error }); setTimeout(() => conn.close(), 500); return; }
         pid = res.pid;
@@ -88,7 +88,7 @@ const Net = {
         const conn = peer.connect(PEER_PREFIX + code, { reliable: true });
         conn.on('open', () => {
           const prof = Profile.get();
-          conn.send({ t: 'hello', clientId: Profile.clientId(), name: prof.name, known: prof.known });
+          conn.send({ t: 'hello', clientId: Profile.clientId(), name: prof.name, known: prof.known, checked: prof.checked, dropped: prof.dropped });
         });
         conn.on('data', m => {
           if (m?.t === 'welcome') {
