@@ -10,6 +10,7 @@ class HostGame {
     const prof = Profile.get();
     this.settings = {
       turnSeconds: 30,
+      noTimer: false,      // turns only end with "End my turn" or the host's Skip
       guessesPerRound: 1,
       revealFandom: false, // players work out their own fandom; host can turn on as an easy mode
       theme: 'shown',      // shared trait: 'shown' to everyone, 'secret' until the end, or 'off'
@@ -95,6 +96,7 @@ class HostGame {
         if (!isHost || this.phase !== 'lobby') return;
         if (m.turnSeconds) this.settings.turnSeconds = Math.max(10, Math.min(300, m.turnSeconds | 0));
         if (m.guessesPerRound) this.settings.guessesPerRound = Math.max(1, Math.min(5, m.guessesPerRound | 0));
+        if (typeof m.noTimer === 'boolean') this.settings.noTimer = m.noTimer;
         if (typeof m.revealFandom === 'boolean') this.settings.revealFandom = m.revealFandom;
         if (['shown', 'secret', 'off'].includes(m.theme)) this.settings.theme = m.theme;
         if (Array.isArray(m.fandoms)) this.settings.fandoms = m.fandoms.filter(id => Library.fandoms.has(id));
@@ -117,7 +119,7 @@ class HostGame {
       }
       case 'start': if (isHost) this.startGame(); break;
       case 'addTime':
-        if (isHost && this.game && !this.game.ended) { this.game.turnEndsAt += 15000; this.armTimer(); this.changed(); }
+        if (isHost && this.game && !this.game.ended && !this.settings.noTimer) { this.game.turnEndsAt += 15000; this.armTimer(); this.changed(); }
         break;
       case 'skipTurn': if (isHost && this.game && !this.game.ended) { this.sys(`Host skipped ${this.name(this.game.current)}'s turn.`); this.nextTurn(); } break;
       case 'endGame': if (isHost && this.game && !this.game.ended) this.endGame(true); break;
@@ -266,7 +268,7 @@ class HostGame {
 
   startTurn() {
     const g = this.game;
-    g.turnEndsAt = Date.now() + this.settings.turnSeconds * 1000;
+    g.turnEndsAt = this.settings.noTimer ? 0 : Date.now() + this.settings.turnSeconds * 1000;
     this.armTimer();
     this.changed();
   }
@@ -274,7 +276,7 @@ class HostGame {
   armTimer() {
     clearTimeout(this._timer);
     const g = this.game;
-    if (!g || g.ended) return;
+    if (!g || g.ended || this.settings.noTimer) return;
     this._timer = setTimeout(() => {
       if (this.game !== g || g.ended) return;
       this.sys(`Time's up for ${this.name(g.current)}.`);
@@ -423,7 +425,7 @@ class HostGame {
         round: g.round, current: g.current, ended: g.ended,
         theme: g.theme && (this.settings.theme === 'shown' || g.ended) ? g.theme : null,
         themeSecret: !!g.theme && this.settings.theme === 'secret' && !g.ended,
-        turnRemaining: g.current ? Math.max(0, g.turnEndsAt - Date.now()) : 0,
+        turnRemaining: g.current && !this.settings.noTimer ? Math.max(0, g.turnEndsAt - Date.now()) : 0,
         guessesLeft: Math.max(0, this.settings.guessesPerRound - (g.guessesUsed[viewer.pid] || 0)),
         swapsLeft: g.ranks[viewer.pid] ? 0 : Math.max(0, 1 - (g.swapsUsed[viewer.pid] || 0)),
         cards: g.order.map(pid => {

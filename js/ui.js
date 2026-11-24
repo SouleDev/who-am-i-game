@@ -291,7 +291,9 @@ const UI = {
     const dis = this.amHost ? '' : 'disabled';
     box.innerHTML = `
       <div class="setting"><label>Turn timer (seconds)<div class="muted small">How long each player's turn lasts.</div></label>
-        <input type="number" id="set-turn" min="10" max="300" step="5" value="${st.turnSeconds}" ${dis}></div>
+        <input type="number" id="set-turn" min="10" max="300" step="5" value="${st.turnSeconds}" ${dis || (st.noTimer ? 'disabled' : '')}></div>
+      <div class="setting"><label>No timer<div class="muted small">Turns last until the player presses "End my turn" (or the host skips them).</div></label>
+        <input type="checkbox" id="set-notimer" ${st.noTimer ? 'checked' : ''} ${dis}></div>
       <div class="setting"><label>Guesses per round<div class="muted small">A round ends after everyone has had a turn.</div></label>
         <input type="number" id="set-guesses" min="1" max="5" value="${st.guessesPerRound}" ${dis}></div>
       <div class="setting"><label>Easy mode: tell players their own fandom<div class="muted small">Off by default. Players have to work out their fandom themselves.</div></label>
@@ -309,6 +311,7 @@ const UI = {
     const num = (id, key) => $('#' + id).addEventListener('change', e => Net.send({ t: 'settings', [key]: +e.target.value }));
     num('set-turn', 'turnSeconds');
     num('set-guesses', 'guessesPerRound');
+    $('#set-notimer').addEventListener('change', e => Net.send({ t: 'settings', noTimer: e.target.checked }));
     $('#set-reveal').addEventListener('change', e => Net.send({ t: 'settings', revealFandom: e.target.checked }));
     $('#set-theme').addEventListener('change', e => Net.send({ t: 'settings', theme: e.target.value }));
     $('#set-fandoms').onclick = () => this.openFandomPicker({
@@ -363,7 +366,9 @@ const UI = {
       : myTurn ? '<span style="color:var(--accent2)">Your turn!</span> Ask questions, add notes, or guess.'
       : `<span style="color:${this.pcolor(g.current)}">${esc(this.pname(g.current))}</span>'s turn`;
     this.turnTotal = s.settings.turnSeconds * 1000;
-    this.deadline = g.current ? performance.now() + g.turnRemaining : 0;
+    this.noTimer = !!s.settings.noTimer;
+    this.deadline = g.current && !this.noTimer ? performance.now() + g.turnRemaining : 0;
+    $('#game-add-time').classList.toggle('hidden', this.noTimer);
     if (g.current !== this.lastCurrent) {
       if (myTurn) { toast('Your turn!', 'turn'); setTimeout(() => $('#game-note input').focus(), 50); }
       this.lastCurrent = g.current;
@@ -459,6 +464,10 @@ const UI = {
   },
 
   tickTimer() {
+    if (this.noTimer && this.state?.game?.current && !this.state.game.ended) {
+      $('#game-timer-num').textContent = '∞';
+      $('#game-timer-bar').style.width = '100%'; $('#game-timer-bar').classList.remove('low'); return;
+    }
     if (!this.state?.game || !this.deadline) {
       $('#game-timer-num').textContent = '–'; $('#game-timer-bar').style.width = '0%'; return;
     }
@@ -513,7 +522,7 @@ const UI = {
         <li><b>Set up:</b> enter your name and tick the fandoms you know. One person hosts and shares the <b>6-character lobby code</b>. Up to 10 players.</li>
         <li><b>Characters:</b> when the game starts, everyone gets a secret character, always from one of the fandoms <i>you</i> picked (that the host included). You can see everyone's character except your own, and you're not told which fandom yours is from.</li>
         <li><b>Shared trait:</b> every character in the game has one trait in common, like #blue, #sword or #redhair, even across different fandoms. The host can show it, keep it secret until the end, or turn it off.</li>
-        <li><b>Turns:</b> players take turns in order, ${'30'} seconds each by default. On your turn, ask the others yes/no questions (voice or chat) and add keywords or phrases to your <b>sheet</b>. Everyone can see every sheet.</li>
+        <li><b>Turns:</b> players take turns in order, 30 seconds each by default (the host can change the time or turn the timer off). On your turn, ask the others yes/no questions (voice or chat) and add keywords or phrases to your <b>sheet</b>. Everyone can see every sheet.</li>
         <li><b>Guessing:</b> you get one guess per round (a round is everyone taking one turn). You can guess at any time. A wrong guess doesn't knock you out, so keep asking.</li>
         <li><b>Ranking:</b> the first person to guess right takes 1st place, then 2nd, then 3rd, and so on.</li>
         <li><b>Give up:</b> the give-up button reveals your character right away and puts you in the last open place.</li>
